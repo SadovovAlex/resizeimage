@@ -1,4 +1,4 @@
-resizeimage.exe -input c:\Downloads\1111\222 -width 1600 -r -quality 70 -threads 8
+resizeimage.exe -input "c:\Downloads\1111\222" -width 1600 -r -quality 70 -threads 8
 
 pause
 

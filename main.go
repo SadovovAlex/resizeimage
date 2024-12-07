@@ -1,5 +1,7 @@
 package main
 
+//TODO: добавить функцию по умолчанию сохранения даты и времени исходного файла
+
 import (
 	"flag"
 	"fmt"
@@ -18,12 +20,13 @@ func printHelp() {
 	fmt.Println("  -input   Путь к директории с изображениями (обязательный, если не указана текущая директория)")
 	fmt.Println("  -width   Новая ширина изображений (обязательный)")
 	fmt.Println("  -r       Перезаписать входные файлы (если указано)")
+	fmt.Println("  -newdate Текущая дата файлов (если указано) (по умолчанию оставляем оригинальную дату файла)")
 	fmt.Println("  -quality Уровень качества выходных изображений (по умолчанию 100)")
 	fmt.Println("  -threads Количество параллельных потоков (по умолчанию 2)")
 	fmt.Println("  -help    Показать это сообщение")
 }
 
-func processImage(inputPath string, newWidth uint, rewrite bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex) {
+func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex) {
 	defer wg.Done()
 	sem <- struct{}{}        // Захватываем семафор
 	defer func() { <-sem }() // Освобождаем семафор
@@ -60,9 +63,9 @@ func processImage(inputPath string, newWidth uint, rewrite bool, quality int, wg
 	// Если флаг перезаписи установлен, используем входной файл как выходной
 	if rewrite {
 		outputPath = inputPath
-		outputFile = inputFile // Это неправильно, нужно создать новый файл
+		outputFile = inputFile // Используем входный файл как выходный
 	} else {
-		outputPath = inputPath[:len(inputPath)-len(filepath.Ext(inputPath))] + "_resized" + filepath.Ext(inputPath)
+		outputPath = inputPath[:len(inputPath)-len(filepath.Ext(inputPath))] + "_r" + filepath.Ext(inputPath)
 		outputFile, err = os.Create(outputPath)
 		if err != nil {
 			fmt.Println("Ошибка при создании файла:", err)
@@ -87,6 +90,15 @@ func processImage(inputPath string, newWidth uint, rewrite bool, quality int, wg
 	if err != nil {
 		fmt.Println("Ошибка при сохранении изображения:", err)
 		return
+	}
+
+	// Устанавливаем время модификации входного файла в выходном файле, по умолчанию оставляем оригинальную дату
+	if !newdate {
+		err = os.Chtimes(outputPath, inputFileInfo.ModTime(), inputFileInfo.ModTime())
+		if err != nil {
+			fmt.Println("Ошибка при установке временных меток:", err)
+			return
+		}
 	}
 
 	// Получаем информацию о размере выходного файла
@@ -119,6 +131,7 @@ func main() {
 	inputDir := flag.String("input", "", "Путь к директории с изображениями")
 	newWidth := flag.Uint("width", 0, "Новая ширина изображений (обязательный)")
 	rewrite := flag.Bool("r", false, "Перезаписать входные файлы")
+	newdate := flag.Bool("newdate", false, "установить текущую дату файла")
 	quality := flag.Int("quality", 100, "Уровень качества выходных изображений (1-100)")
 	threads := flag.Int("threads", 2, "Количество параллельных потоков (по умолчанию 2)")
 
@@ -156,7 +169,7 @@ func main() {
 		// Проверяем, что это файл и он находится в текущей директории
 		if !info.IsDir() && (filepath.Ext(path) == ".jpg" || filepath.Ext(path) == ".jpeg") && filepath.Dir(path) == *inputDir {
 			wg.Add(1)
-			go processImage(path, *newWidth, *rewrite, *quality, &wg, sem, stats, &mu)
+			go processImage(path, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
 		}
 		return nil
 	})
