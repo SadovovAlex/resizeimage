@@ -174,7 +174,7 @@ func main() {
 	fmt.Printf("Обработано файлов: %d\n", stats.ProcessedFiles)
 	fmt.Printf("Общий входной размер: %.2f МБ\n", float64(stats.TotalInputSize)/1024/1024)
 	fmt.Printf("Общий выходной размер: %.2f МБ\n", float64(stats.TotalOutputSize)/1024/1024)
-	fmt.Printf("Общее сокращение размера: %.2f%% МБ, %.2f%%\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
+	fmt.Printf("Общее сокращение размера: %.2f МБ, %.2f%%\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
 
 	fmt.Println("Обработка завершена.")
 }
