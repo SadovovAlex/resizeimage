@@ -54,6 +54,20 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 		return
 	}
 
+	// Получаем размеры изображения
+	bounds := img.Bounds()
+	imgWidth := bounds.Dx()
+	imgHeight := bounds.Dy()
+
+	// Проверяем, если ширина изображения меньше newWidth, пропускаем обработку
+	if imgWidth < int(newWidth) {
+		fmt.Printf(
+			"Processed: %s, width %d small than %d, (%d*%d) skip\n",
+			inputPath, imgWidth, newWidth, imgWidth, imgHeight,
+		)
+		return
+	}
+
 	// Изменяем размер изображения с сохранением пропорций
 	resizedImg := resize.Resize(newWidth, 0, img, resize.Lanczos3)
 
@@ -117,7 +131,16 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	mu.Unlock()
 
 	// Выводим прогресс
-	fmt.Printf("Обработано: %s, Входной размер: %d байт, Выходной размер: %d байт\n", inputPath, inputFileSize, outputFileSize)
+	fmt.Printf(
+		"Processed: %s,In/Out:%.2f/%.2fMb, optimize:%.2f%%, %.2fMb free\n",
+		inputPath,
+		float64(inputFileSize)/1024/1024,
+		float64(outputFileSize)/1024/1024,
+		float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
+		float64(inputFileSize-outputFileSize)/1024/1024,
+	)
+	//fmt.Printf("Общее сокращение размера: %.2f МБ, %.2f%%\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
+
 }
 
 type Statistics struct {
@@ -167,7 +190,7 @@ func main() {
 			return err
 		}
 		// Проверяем, что это файл и он находится в текущей директории
-		if !info.IsDir() && (filepath.Ext(path) == ".jpg" || filepath.Ext(path) == ".jpeg") && filepath.Dir(path) == *inputDir {
+		if !info.IsDir() && (filepath.Ext(path) == ".jpg" || filepath.Ext(path) == ".JPG" || filepath.Ext(path) == ".jpeg") && filepath.Dir(path) == *inputDir {
 			wg.Add(1)
 			go processImage(path, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
 		}
@@ -183,11 +206,11 @@ func main() {
 	wg.Wait()
 
 	// Выводим общую статистику в мегабайтах
-	fmt.Printf("\nCтатистика:\n")
-	fmt.Printf("Обработано файлов: %d\n", stats.ProcessedFiles)
-	fmt.Printf("Общий входной размер: %.2f МБ\n", float64(stats.TotalInputSize)/1024/1024)
-	fmt.Printf("Общий выходной размер: %.2f МБ\n", float64(stats.TotalOutputSize)/1024/1024)
-	fmt.Printf("Общее сокращение размера: %.2f МБ, %.2f%%\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
+	fmt.Printf("\nStatistics:\n")
+	fmt.Printf("Processed Files:%d\n", stats.ProcessedFiles)
+	fmt.Printf("Total Input:%.2fMb\n", float64(stats.TotalInputSize)/1024/1024)
+	fmt.Printf("Total Output:%.2fMb\n", float64(stats.TotalOutputSize)/1024/1024)
+	fmt.Printf("Total Savings: %.2fMb, %.2f%% of original size\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
 
-	fmt.Println("Обработка завершена.")
+	fmt.Println("Prcessing done.")
 }
