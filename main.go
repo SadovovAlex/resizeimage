@@ -15,15 +15,15 @@ func printHelp() {
 	fmt.Println("Использование:")
 	fmt.Println("  resize_image -input <input_dir> -width <width> [-r] [-quality <1-100>] [-threads <num>]")
 	fmt.Println("Параметры:")
-	fmt.Println("  -input   Путь к директории с изображениями (обязательный)")
+	fmt.Println("  -input   Путь к директории с изображениями (обязательный, если не указана текущая директория)")
 	fmt.Println("  -width   Новая ширина изображений (обязательный)")
 	fmt.Println("  -r       Перезаписать входные файлы (если указано)")
 	fmt.Println("  -quality Уровень качества выходных изображений (по умолчанию 100)")
-	fmt.Println("  -threads Количество параллельных потоков (по умолчанию 1)")
+	fmt.Println("  -threads Количество параллельных потоков (по умолчанию 2)")
 	fmt.Println("  -help    Показать это сообщение")
 }
 
-func processImage(inputPath string, newWidth uint, rewrite bool, quality int, wg *sync.WaitGroup, sem chan struct{}) {
+func processImage(inputPath string, newWidth uint, rewrite bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex) {
 	defer wg.Done()
 	sem <- struct{}{}        // Захватываем семафор
 	defer func() { <-sem }() // Освобождаем семафор
@@ -97,17 +97,27 @@ func processImage(inputPath string, newWidth uint, rewrite bool, quality int, wg
 	}
 	outputFileSize := outputFileInfo.Size()
 
-	// Выводим статистику по сокращению размера файла
-	fmt.Printf("Обработано: %s\n", inputPath)
-	fmt.Printf("Размер входного файла: %d байт\n", inputFileSize)
-	fmt.Printf("Размер выходного файла: %d байт\n", outputFileSize)
-	fmt.Printf("Сокращение размера: %.2f%%\n", float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100)
+	// Обновляем статистику
+	mu.Lock()
+	stats.TotalInputSize += inputFileSize
+	stats.TotalOutputSize += outputFileSize
+	stats.ProcessedFiles++
+	mu.Unlock()
+
+	// Выводим прогресс
+	fmt.Printf("Обработано: %s, Входной размер: %d байт, Выходной размер: %d байт\n", inputPath, inputFileSize, outputFileSize)
+}
+
+type Statistics struct {
+	TotalInputSize  int64
+	TotalOutputSize int64
+	ProcessedFiles  int
 }
 
 func main() {
 	// Определяем флаги
 	inputDir := flag.String("input", "", "Путь к директории с изображениями")
-	newWidth := flag.Uint("width", 0, "Новая ширина изображений")
+	newWidth := flag.Uint("width", 0, "Новая ширина изображений (обязательный)")
 	rewrite := flag.Bool("r", false, "Перезаписать входные файлы")
 	quality := flag.Int("quality", 100, "Уровень качества выходных изображений (1-100)")
 	threads := flag.Int("threads", 2, "Количество параллельных потоков (по умолчанию 2)")
@@ -135,15 +145,18 @@ func main() {
 	sem := make(chan struct{}, *threads)
 
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	stats := &Statistics{}
 
 	// Получаем список всех файлов .jpg и .jpeg в указанной директории
 	err := filepath.Walk(*inputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && (filepath.Ext(path) == ".jpg" || filepath.Ext(path) == ".jpeg") {
+		// Проверяем, что это файл и он находится в текущей директории
+		if !info.IsDir() && (filepath.Ext(path) == ".jpg" || filepath.Ext(path) == ".jpeg") && filepath.Dir(path) == *inputDir {
 			wg.Add(1)
-			go processImage(path, *newWidth, *rewrite, *quality, &wg, sem)
+			go processImage(path, *newWidth, *rewrite, *quality, &wg, sem, stats, &mu)
 		}
 		return nil
 	})
@@ -155,5 +168,13 @@ func main() {
 
 	// Ждем завершения всех горутин
 	wg.Wait()
+
+	// Выводим общую статистику в мегабайтах
+	fmt.Printf("\nCтатистика:\n")
+	fmt.Printf("Обработано файлов: %d\n", stats.ProcessedFiles)
+	fmt.Printf("Общий входной размер: %.2f МБ\n", float64(stats.TotalInputSize)/1024/1024)
+	fmt.Printf("Общий выходной размер: %.2f МБ\n", float64(stats.TotalOutputSize)/1024/1024)
+	fmt.Printf("Общее сокращение размера: %.2f%% МБ, %.2f%%\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
+
 	fmt.Println("Обработка завершена.")
 }
