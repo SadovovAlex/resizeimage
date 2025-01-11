@@ -15,10 +15,10 @@ import (
 
 func printHelp() {
 	fmt.Println("Использование:")
-	fmt.Println("  resize_image -input <input_dir> -width <width> [-r] [-quality <1-100>] [-threads <num>]")
+	fmt.Println("  resize_image -input <input_dir> -maxwidth <width> [-r] [-quality <1-100>] [-threads <num>]")
 	fmt.Println("Параметры:")
 	fmt.Println("  -input   Путь к директории с изображениями (обязательный, если не указана текущая директория)")
-	fmt.Println("  -width   Новая ширина изображений (обязательный)")
+	fmt.Println("  -maxwidth   Новая ширина изображений (обязательный)")
 	fmt.Println("  -r       Перезаписать входные файлы (если указано)")
 	fmt.Println("  -newdate Текущая дата файлов (если указано) (по умолчанию оставляем оригинальную дату файла)")
 	fmt.Println("  -quality Уровень качества выходных изображений (по умолчанию 100)")
@@ -149,10 +149,26 @@ type Statistics struct {
 	ProcessedFiles  int
 }
 
+// Функция для чтения директории с использованием кодировки UTF-8
+func readDirUTF8(path string) ([]os.DirEntry, error) {
+	d, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+
+	names, err := d.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	return names, nil
+}
+
 func main() {
 	// Определяем флаги
 	inputDir := flag.String("input", "", "Путь к директории с изображениями")
-	newWidth := flag.Uint("width", 0, "Новая ширина изображений (обязательный)")
+	newWidth := flag.Uint("maxwidth", 0, "Новая ширина изображений (обязательный)")
 	rewrite := flag.Bool("r", false, "Перезаписать входные файлы")
 	newdate := flag.Bool("newdate", false, "установить текущую дату файла")
 	quality := flag.Int("quality", 100, "Уровень качества выходных изображений (1-100)")
@@ -185,21 +201,31 @@ func main() {
 	stats := &Statistics{}
 
 	// Получаем список всех файлов .jpg и .jpeg в указанной директории
-	err := filepath.Walk(*inputDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		// Проверяем, что это файл и он находится в текущей директории
-		if !info.IsDir() && (filepath.Ext(path) == ".jpg" || filepath.Ext(path) == ".JPG" || filepath.Ext(path) == ".jpeg") && filepath.Dir(path) == *inputDir {
-			wg.Add(1)
-			go processImage(path, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
-		}
-		return nil
-	})
+	fmt.Println("Чтение директории:", *inputDir)
 
+	cleanPath, err := filepath.Abs(*inputDir)
 	if err != nil {
-		fmt.Println("Ошибка при обходе директории:", err)
+		fmt.Println("Ошибка при получении абсолютного пути:", err)
 		return
+	}
+	fmt.Println("Clean директории:", cleanPath)
+
+	files, err := os.ReadDir(cleanPath)
+	if err != nil {
+		// Если возникла ошибка при чтении директории, попробуем использовать кодировку UTF-8
+		files, err = readDirUTF8(cleanPath)
+		if err != nil {
+			fmt.Println("Ошибка при чтении директории:", err)
+			return
+		}
+	}
+
+	for _, file := range files {
+		if !file.IsDir() && (filepath.Ext(file.Name()) == ".jpg" || filepath.Ext(file.Name()) == ".JPG" || filepath.Ext(file.Name()) == ".jpeg") {
+			filePath := filepath.Join(cleanPath, file.Name())
+			wg.Add(1)
+			go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
+		}
 	}
 
 	// Ждем завершения всех горутин
