@@ -1,7 +1,5 @@
 package main
 
-//TODO: добавить функцию по умолчанию сохранения даты и времени исходного файла
-
 import (
 	"flag"
 	"fmt"
@@ -27,6 +25,7 @@ func printHelp() {
 }
 
 func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex) {
+	cCutDirName := 50
 	defer wg.Done()
 	sem <- struct{}{}        // Захватываем семафор
 	defer func() { <-sem }() // Освобождаем семафор
@@ -60,11 +59,18 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	imgHeight := bounds.Dy()
 
 	// Проверяем, если ширина изображения меньше newWidth, пропускаем обработку
-	if imgWidth < int(newWidth) {
-		fmt.Printf(
-			"Processed: %s, width %d small than %d, (%d*%d) skip\n",
-			inputPath, imgWidth, newWidth, imgWidth, imgHeight,
-		)
+	if imgWidth <= int(newWidth) {
+		if len(inputPath) > cCutDirName {
+			fmt.Printf(
+				"Processed: ...%s, width (%d*%d) < maxwidth %d,  skip\n",
+				inputPath[cCutDirName:], imgWidth, imgHeight, newWidth,
+			)
+		} else {
+			fmt.Printf(
+				"Processed: %s, width (%d*%d) < maxwidth %d,  skip\n",
+				inputPath, imgWidth, imgHeight, newWidth,
+			)
+		}
 		return
 	}
 
@@ -131,14 +137,25 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	mu.Unlock()
 
 	// Выводим прогресс
-	fmt.Printf(
-		"Processed: %s,In/Out:%.2f/%.2fMb, optimize:%.2f%%, %.2fMb free\n",
-		inputPath,
-		float64(inputFileSize)/1024/1024,
-		float64(outputFileSize)/1024/1024,
-		float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
-		float64(inputFileSize-outputFileSize)/1024/1024,
-	)
+	if len(inputPath) > cCutDirName {
+		fmt.Printf(
+			"Processed: ...%s, %.2f->%.2fMb, optimize:%.2f%%, %.2fMb free\n",
+			inputPath[cCutDirName:],
+			float64(inputFileSize)/1024/1024,
+			float64(outputFileSize)/1024/1024,
+			float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
+			float64(inputFileSize-outputFileSize)/1024/1024,
+		)
+	} else {
+		fmt.Printf(
+			"Processed: %s,In/Out:%.2f/%.2fMb, optimize:%.2f%%, %.2fMb free\n",
+			inputPath,
+			float64(inputFileSize)/1024/1024,
+			float64(outputFileSize)/1024/1024,
+			float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
+			float64(inputFileSize-outputFileSize)/1024/1024,
+		)
+	}
 	//fmt.Printf("Общее сокращение размера: %.2f МБ, %.2f%%\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
 
 }
