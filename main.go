@@ -17,18 +17,21 @@ import (
 
 func printHelp() {
 	fmt.Println("Использование:")
-	fmt.Println("  resize_image -input <input_dir> -maxwidth <width> [-r] [-quality <1-100>] [-threads <num>]")
+	fmt.Println("  resize_image -input <input_dir> -maxwidth <width> [-rw -R] [-quality <1-100>] [-threads <num>]")
 	fmt.Println("Параметры:")
 	fmt.Println("  -input   Путь к директории с изображениями (обязательный, если не указана текущая директория)")
+	fmt.Println("  -R   Искать в поддиректоиях")
 	fmt.Println("  -maxwidth   Новая ширина изображений (обязательный)")
-	fmt.Println("  -r       Перезаписать входные файлы (если указано)")
+	fmt.Println("  -rw       Перезаписать входные файлы (если указано)")
 	fmt.Println("  -newdate Текущая дата файлов (если указано) (по умолчанию оставляем оригинальную дату файла)")
 	fmt.Println("  -quality Уровень качества выходных изображений (по умолчанию 100)")
 	fmt.Println("  -threads Количество параллельных потоков (по умолчанию 2)")
 	fmt.Println("  -help    Показать это сообщение")
+	fmt.Println("  Пример: Сжать все файлы в директории с:\foto[-input], переписать оригиналы(заменить)[-rw], во всех поддиректориях[-R], размером более 2048[-maxwidth], качество 80[-quality 80], в 10 потоков[-threads 10]")
+	fmt.Println("  resize_image -input C:\foto -maxwidth 2048 -rw -R -quality 80 -threads 10")
 }
 
-func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex) {
+func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex, goroutineID int) {
 	cCutDirName := 50
 	defer wg.Done()
 	sem <- struct{}{}        // Захватываем семафор
@@ -53,7 +56,7 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	// Декодируем изображение
 	img, err := jpeg.Decode(inputFile)
 	if err != nil {
-		fmt.Println("Ошибка при декодировании изображения:", err)
+		fmt.Printf("[%d]Ошибка при декодировании изображения: %v\n", goroutineID, err)
 		return
 	}
 
@@ -66,12 +69,12 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	if imgWidth <= int(newWidth) {
 		if len(inputPath) > cCutDirName {
 			fmt.Printf(
-				"Processed: ...%s, width (%d*%d) < maxwidth %d,  skip\n",
-				inputPath[cCutDirName:], imgWidth, imgHeight, newWidth,
+				"Skip: ...%s, width (%d*%d) <= maxwidth %d\n",
+				inputPath[len(inputPath)-cCutDirName:], imgWidth, imgHeight, newWidth,
 			)
 		} else {
 			fmt.Printf(
-				"Processed: %s, width (%d*%d) < maxwidth %d,  skip\n",
+				"Skip: %s, width (%d*%d) <= maxwidth %d\n",
 				inputPath, imgWidth, imgHeight, newWidth,
 			)
 		}
@@ -144,7 +147,7 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	if len(inputPath) > cCutDirName {
 		fmt.Printf(
 			"Processed: ...%s, %.2f->%.2fMb, optimize:%.2f%%, %.2fMb free\n",
-			inputPath[cCutDirName:],
+			inputPath[len(inputPath)-cCutDirName:],
 			float64(inputFileSize)/1024/1024,
 			float64(outputFileSize)/1024/1024,
 			float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
@@ -160,7 +163,6 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 			float64(inputFileSize-outputFileSize)/1024/1024,
 		)
 	}
-	//fmt.Printf("Общее сокращение размера: %.2f МБ, %.2f%%\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
 
 }
 
@@ -170,27 +172,12 @@ type Statistics struct {
 	ProcessedFiles  int
 }
 
-// Функция для чтения директории с использованием кодировки UTF-8
-func readDirUTF8(path string) ([]os.DirEntry, error) {
-	d, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer d.Close()
-
-	names, err := d.ReadDir(-1)
-	if err != nil {
-		return nil, err
-	}
-
-	return names, nil
-}
-
 func main() {
 	// Определяем флаги
 	inputDir := flag.String("input", "", "Путь к директории с изображениями")
+	recursion := flag.Bool("R", false, "Искать в поддиректориях")
 	newWidth := flag.Uint("maxwidth", 0, "Новая ширина изображений (обязательный)")
-	rewrite := flag.Bool("r", false, "Перезаписать входные файлы")
+	rewrite := flag.Bool("rw", false, "Перезаписать входные файлы")
 	newdate := flag.Bool("newdate", false, "установить текущую дату файла")
 	quality := flag.Int("quality", 100, "Уровень качества выходных изображений (1-100)")
 	threads := flag.Int("threads", 2, "Количество параллельных потоков (по умолчанию 2)")
@@ -221,12 +208,22 @@ func main() {
 	var mu sync.Mutex
 	stats := &Statistics{}
 
+	// Поиск в текущей директории
+	var count int
+	var totalSize int64
+	var jpgFiles []string
 	fmt.Println("Find files:", *inputDir)
-	jpgFiles := findJpgFiles(*inputDir)
-	for _, filePath := range jpgFiles {
+	if *recursion {
+		count, totalSize, jpgFiles = findJpgFiles(*inputDir, true)
+	} else {
+		count, totalSize, jpgFiles = findJpgFiles(*inputDir, false)
+	}
+	fmt.Printf("Найдено %d файлов JPG, размер: %.2fМб\n", count, float64(totalSize)/1024/1024)
+
+	for i, filePath := range jpgFiles {
 		//fmt.Println(filePath)
 		wg.Add(1)
-		go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
+		go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu, i)
 	}
 
 	/*
@@ -243,27 +240,33 @@ func main() {
 	wg.Wait()
 
 	// Выводим общую статистику в мегабайтах
-	fmt.Printf("\nStatistics:\n")
-	fmt.Printf("Processed Files:%d\n", stats.ProcessedFiles)
-	fmt.Printf("Total Input:%.2fMb\n", float64(stats.TotalInputSize)/1024/1024)
-	fmt.Printf("Total Output:%.2fMb\n", float64(stats.TotalOutputSize)/1024/1024)
-	fmt.Printf("Total Savings: %.2fMb, %.2f%% of original size\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
-
-	fmt.Println("Prcessing done.")
+	fmt.Println("\n╔═════════════════════════════════════════════════════╗")
+	fmt.Printf("║ Processed Files: %d\n", stats.ProcessedFiles)
+	fmt.Printf("║ Total Input: %.2fMb Total Output: %.2fMb\n", float64(stats.TotalInputSize)/1024/1024, float64(stats.TotalOutputSize)/1024/1024)
+	fmt.Printf("║ Total Space Save: %.2fMb, %.2f%% of original size\n",
+		(float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024,
+		float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
+	fmt.Println("╚═════════════════════════════════════════════════════╝")
+	fmt.Println("Processing done.")
 }
-
-func findJpgFiles(dir string) []string {
+func findJpgFiles(dir string, recursive bool) (int, int64, []string) {
 	var jpgFiles []string
+	var totalSize int64 = 0
+	var count int = 0
+
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		log.Printf("Ошибка при чтении директории %s: %v", dir, err)
-		return jpgFiles
+		return count, totalSize, jpgFiles
 	}
 
 	for _, file := range files {
-		if file.IsDir() {
+		if file.IsDir() && recursive {
 			// Рекурсивно вызываем функцию для поддиректории
-			jpgFiles = append(jpgFiles, findJpgFiles(filepath.Join(dir, file.Name()))...)
+			subCount, subSize, subFiles := findJpgFiles(filepath.Join(dir, file.Name()), recursive)
+			count += subCount
+			totalSize += subSize
+			jpgFiles = append(jpgFiles, subFiles...)
 		} else if !file.IsDir() && strings.HasSuffix(file.Name(), ".jpg") {
 			filePath := filepath.Join(dir, file.Name())
 			if runtime.GOOS == "windows" {
@@ -271,10 +274,12 @@ func findJpgFiles(dir string) []string {
 				filePath = convertToWindowsPath(filePath)
 			}
 			jpgFiles = append(jpgFiles, filePath)
+			totalSize += file.Size()
+			count++
 		}
 	}
 
-	return jpgFiles
+	return count, totalSize, jpgFiles
 }
 
 func convertToWindowsPath(path string) string {
