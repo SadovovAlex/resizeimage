@@ -12,7 +12,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/k0kubun/go-ansi"
 	"github.com/nfnt/resize"
+	"github.com/schollz/progressbar/v3"
 )
 
 func printHelp() {
@@ -31,8 +33,8 @@ func printHelp() {
 	fmt.Println("  resize_image -input C:\foto -maxwidth 2048 -rw -R -quality 80 -threads 10")
 }
 
-func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex, goroutineID int) {
-	cCutDirName := 50
+func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex, goroutineID int, bar *progressbar.ProgressBar) {
+	//cCutDirName := 50
 	defer wg.Done()
 	sem <- struct{}{}        // Захватываем семафор
 	defer func() { <-sem }() // Освобождаем семафор
@@ -56,18 +58,18 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	// Декодируем изображение
 	img, err := jpeg.Decode(inputFile)
 	if err != nil {
-		fmt.Printf("[%d]Ошибка при декодировании изображения: %v\n", goroutineID, err)
+		//fmt.Printf("[%d]Ошибка при декодировании изображения: %v\n", goroutineID, err)
 		return
 	}
 
 	// Получаем размеры изображения
 	bounds := img.Bounds()
 	imgWidth := bounds.Dx()
-	imgHeight := bounds.Dy()
+	//imgHeight := bounds.Dy()
 
 	// Проверяем, если ширина изображения меньше newWidth, пропускаем обработку
 	if imgWidth <= int(newWidth) {
-		if len(inputPath) > cCutDirName {
+		/*if len(inputPath) > cCutDirName {
 			fmt.Printf(
 				"Skip: ...%s, width (%d*%d) <= maxwidth %d\n",
 				inputPath[len(inputPath)-cCutDirName:], imgWidth, imgHeight, newWidth,
@@ -78,6 +80,9 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 				inputPath, imgWidth, imgHeight, newWidth,
 			)
 		}
+		*/
+		// Обновляем прогресс-бар
+		bar.Add(1)
 		return
 	}
 
@@ -144,25 +149,31 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	mu.Unlock()
 
 	// Выводим прогресс
-	if len(inputPath) > cCutDirName {
-		fmt.Printf(
-			"Processed: ...%s, %.2f->%.2fMb, optimize:%.2f%%, %.2fMb free\n",
-			inputPath[len(inputPath)-cCutDirName:],
-			float64(inputFileSize)/1024/1024,
-			float64(outputFileSize)/1024/1024,
-			float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
-			float64(inputFileSize-outputFileSize)/1024/1024,
-		)
-	} else {
-		fmt.Printf(
-			"Processed: %s,In/Out:%.2f/%.2fMb, optimize:%.2f%%, %.2fMb free\n",
-			inputPath,
-			float64(inputFileSize)/1024/1024,
-			float64(outputFileSize)/1024/1024,
-			float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
-			float64(inputFileSize-outputFileSize)/1024/1024,
-		)
-	}
+	/*
+		if len(inputPath) > cCutDirName {
+			fmt.Printf(
+				"Processed: ...%s, %.2f->%.2fMb, optimize:%.2f%%, %.2fMb free\n",
+				inputPath[len(inputPath)-cCutDirName:],
+				float64(inputFileSize)/1024/1024,
+				float64(outputFileSize)/1024/1024,
+				float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
+				float64(inputFileSize-outputFileSize)/1024/1024,
+			)
+		} else {
+			fmt.Printf(
+				"Processed: %s,In/Out:%.2f/%.2fMb, optimize:%.2f%%, %.2fMb free\n",
+				inputPath,
+				float64(inputFileSize)/1024/1024,
+				float64(outputFileSize)/1024/1024,
+				float64(inputFileSize-outputFileSize)/float64(inputFileSize)*100,
+				float64(inputFileSize-outputFileSize)/1024/1024,
+			)
+		}
+
+	*/
+
+	// Обновляем прогресс-бар
+	bar.Add(1)
 
 }
 
@@ -220,10 +231,26 @@ func main() {
 	}
 	fmt.Printf("Найдено %d файлов JPG, размер: %.2fМб\n", count, float64(totalSize)/1024/1024)
 
+	// Создаем прогресс-бар
+	//bar := progressbar.Default(int64(len(jpgFiles)), "Processing files" )
+	bar := progressbar.NewOptions(int(len(jpgFiles)),
+		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionSetWidth(50),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        " ",
+			AltSaucerHead: "[yellow]<[reset]",
+			SaucerHead:    "[yellow]-[reset]",
+			SaucerPadding: "[white]•",
+			BarStart:      "[blue]|[reset]",
+			BarEnd:        "[blue]|[reset]",
+		}),
+	)
+
 	for i, filePath := range jpgFiles {
 		//fmt.Println(filePath)
 		wg.Add(1)
-		go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu, i)
+		go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu, i, bar)
 	}
 
 	/*
