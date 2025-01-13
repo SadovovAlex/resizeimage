@@ -11,8 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/k0kubun/go-ansi"
 	"github.com/nfnt/resize"
 	"github.com/schollz/progressbar/v3"
 )
@@ -35,6 +35,7 @@ func printHelp() {
 
 func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, quality int, wg *sync.WaitGroup, sem chan struct{}, stats *Statistics, mu *sync.Mutex, goroutineID int, bar *progressbar.ProgressBar) {
 	//cCutDirName := 50
+
 	defer wg.Done()
 	sem <- struct{}{}        // Захватываем семафор
 	defer func() { <-sem }() // Освобождаем семафор
@@ -46,10 +47,6 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 		return
 	}
 	defer inputFile.Close()
-
-	// Обновляем прогресс-бар
-	//bar.Describe(inputFile.Name())
-	bar.Add(1)
 
 	// Получаем информацию о размере входного файла
 	inputFileInfo, err := inputFile.Stat()
@@ -74,6 +71,9 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 
 	// Проверяем, если ширина изображения меньше newWidth, пропускаем обработку
 	if imgWidth <= int(newWidth) {
+		// Обновляем прогресс-бар
+		bar.Add(1)
+
 		/*if len(inputPath) > cCutDirName {
 			fmt.Printf(
 				"Skip: ...%s, width (%d*%d) <= maxwidth %d\n",
@@ -174,6 +174,8 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 		}
 
 	*/
+	// Обновляем прогресс-бар
+	bar.Add(1)
 
 }
 
@@ -232,15 +234,20 @@ func main() {
 	fmt.Printf("Найдено %d файлов JPG, размер: %.2fМб\n", count, float64(totalSize)/1024/1024)
 
 	// Создаем прогресс-бар
-	//bar := progressbar.Default(int64(len(jpgFiles)), "Processing files" )
-	bar := progressbar.NewOptions(int(len(jpgFiles)),
-		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
+	bar := progressbar.NewOptions(len(jpgFiles), //index=0
 		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionSetWidth(50),
-		progressbar.OptionSetMaxDetailRow(3),
-		progressbar.OptionSpinnerType(14),
+		progressbar.OptionSetPredictTime(true),
+		progressbar.OptionSetDescription("Resize Images..."),
+		progressbar.OptionShowCount(),
+		progressbar.OptionThrottle(300*time.Millisecond),
+		progressbar.OptionUseANSICodes(false),
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionShowIts(),
+		progressbar.OptionSetTheme(progressbar.ThemeUnicode),
+		progressbar.OptionShowElapsedTimeOnFinish(),
 		progressbar.OptionFullWidth(),
-		progressbar.OptionSetRenderBlankState(true),
+
+		//progressbar.OptionSetRenderBlankState(true),
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        " ",
 			AltSaucerHead: "[yellow]<[reset]",
@@ -256,7 +263,6 @@ func main() {
 		wg.Add(1)
 		go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu, i, bar)
 	}
-
 	/*
 		for _, file := range files {
 			if !file.IsDir() && (filepath.Ext(file.Name()) == ".jpg" || filepath.Ext(file.Name()) == ".JPG" || filepath.Ext(file.Name()) == ".jpeg") {
