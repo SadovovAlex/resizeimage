@@ -4,8 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"image/jpeg"
+	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/nfnt/resize"
@@ -217,33 +221,23 @@ func main() {
 	var mu sync.Mutex
 	stats := &Statistics{}
 
-	// Получаем список всех файлов .jpg и .jpeg в указанной директории
-	fmt.Println("Чтение директории:", *inputDir)
-
-	cleanPath, err := filepath.Abs(*inputDir)
-	if err != nil {
-		fmt.Println("Ошибка при получении абсолютного пути:", err)
-		return
+	fmt.Println("Find files:", *inputDir)
+	jpgFiles := findJpgFiles(*inputDir)
+	for _, filePath := range jpgFiles {
+		//fmt.Println(filePath)
+		wg.Add(1)
+		go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
 	}
-	fmt.Println("Clean директории:", cleanPath)
 
-	files, err := os.ReadDir(cleanPath)
-	if err != nil {
-		// Если возникла ошибка при чтении директории, попробуем использовать кодировку UTF-8
-		files, err = readDirUTF8(cleanPath)
-		if err != nil {
-			fmt.Println("Ошибка при чтении директории:", err)
-			return
+	/*
+		for _, file := range files {
+			if !file.IsDir() && (filepath.Ext(file.Name()) == ".jpg" || filepath.Ext(file.Name()) == ".JPG" || filepath.Ext(file.Name()) == ".jpeg") {
+				filePath := filepath.Join(cleanPath, file.Name())
+				wg.Add(1)
+				go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
+			}
 		}
-	}
-
-	for _, file := range files {
-		if !file.IsDir() && (filepath.Ext(file.Name()) == ".jpg" || filepath.Ext(file.Name()) == ".JPG" || filepath.Ext(file.Name()) == ".jpeg") {
-			filePath := filepath.Join(cleanPath, file.Name())
-			wg.Add(1)
-			go processImage(filePath, *newWidth, *rewrite, *newdate, *quality, &wg, sem, stats, &mu)
-		}
-	}
+	*/
 
 	// Ждем завершения всех горутин
 	wg.Wait()
@@ -256,4 +250,34 @@ func main() {
 	fmt.Printf("Total Savings: %.2fMb, %.2f%% of original size\n", (float64(stats.TotalInputSize)-float64(stats.TotalOutputSize))/1024/1024, float64(stats.TotalInputSize-stats.TotalOutputSize)/float64(stats.TotalInputSize)*100)
 
 	fmt.Println("Prcessing done.")
+}
+
+func findJpgFiles(dir string) []string {
+	var jpgFiles []string
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Printf("Ошибка при чтении директории %s: %v", dir, err)
+		return jpgFiles
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			// Рекурсивно вызываем функцию для поддиректории
+			jpgFiles = append(jpgFiles, findJpgFiles(filepath.Join(dir, file.Name()))...)
+		} else if !file.IsDir() && strings.HasSuffix(file.Name(), ".jpg") {
+			filePath := filepath.Join(dir, file.Name())
+			if runtime.GOOS == "windows" {
+				// Преобразуем путь к файлу в кодировку Windows
+				filePath = convertToWindowsPath(filePath)
+			}
+			jpgFiles = append(jpgFiles, filePath)
+		}
+	}
+
+	return jpgFiles
+}
+
+func convertToWindowsPath(path string) string {
+	// Преобразуем путь к файлу в кодировку Windows
+	return string([]byte(path))
 }
