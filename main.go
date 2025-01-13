@@ -47,6 +47,10 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	}
 	defer inputFile.Close()
 
+	// Обновляем прогресс-бар
+	//bar.Describe(inputFile.Name())
+	bar.Add(1)
+
 	// Получаем информацию о размере входного файла
 	inputFileInfo, err := inputFile.Stat()
 	if err != nil {
@@ -59,6 +63,7 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 	img, err := jpeg.Decode(inputFile)
 	if err != nil {
 		//fmt.Printf("[%d]Ошибка при декодировании изображения: %v\n", goroutineID, err)
+
 		return
 	}
 
@@ -81,8 +86,6 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 			)
 		}
 		*/
-		// Обновляем прогресс-бар
-		bar.Add(1)
 		return
 	}
 
@@ -172,9 +175,6 @@ func processImage(inputPath string, newWidth uint, rewrite bool, newdate bool, q
 
 	*/
 
-	// Обновляем прогресс-бар
-	bar.Add(1)
-
 }
 
 type Statistics struct {
@@ -237,6 +237,10 @@ func main() {
 		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
 		progressbar.OptionEnableColorCodes(true),
 		progressbar.OptionSetWidth(50),
+		progressbar.OptionSetMaxDetailRow(3),
+		progressbar.OptionSpinnerType(14),
+		progressbar.OptionFullWidth(),
+		progressbar.OptionSetRenderBlankState(true),
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        " ",
 			AltSaucerHead: "[yellow]<[reset]",
